@@ -1,11 +1,38 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
+mod vg_lite;
 
-include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
-
+use vg_lite::*;
 use std::ptr::null_mut;
+
+pub struct Context(());
+impl Context {
+    /// Can be called before [`Context::new`] to overwrite the default value: 65536
+    pub fn set_command_size(size: u32) -> Result<(), Error> {
+        wrap_result((), unsafe {
+            vg_lite_set_command_buffer_size(size)
+        })
+    }
+    pub fn new(tess_width: u32, tess_height: u32) -> Result<Self, Error> {
+        wrap_result(Context(()), unsafe {
+            vg_lite_init(tess_width as i32, tess_height as i32)
+        })
+    }
+    /// Do drawing with blocking
+    pub fn finish(self) -> Result<(), Error> {
+        wrap_result((), unsafe { vg_lite_finish() })
+    }
+    /// Do drawing without blocking
+    pub fn flush(self) -> Result<(), Error> {
+        wrap_result((), unsafe { vg_lite_flush() })
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        unsafe { vg_lite_close(); }
+    }
+}
 
 enum BufferSource {
     None,
@@ -35,7 +62,6 @@ impl From<Format> for vg_lite_format_t {
 pub struct Buffer {
     buffer: vg_lite_buffer,
     source: BufferSource,
-    format: Format
 }
 
 impl vg_lite_buffer {
@@ -110,12 +136,19 @@ impl From<vg_lite_error> for Error {
     }
 }
 
+fn wrap_result<T>(t: T, error: vg_lite_error) -> Result<T, Error> {
+    if error == vg_lite_error_VG_LITE_SUCCESS {
+        Ok(t)
+    } else {
+        Err(error.into())
+    }
+}
+
 impl Buffer {
     pub fn allocate(width: u32, height: u32, format: Format) -> Result<Self, Error> {
         let mut buffer = Buffer {
             buffer: vg_lite_buffer::new(width as i32, height as i32, format.into()),
-            source: BufferSource::None,
-            format
+            source: BufferSource::None
         };
         let error = unsafe {
             vg_lite_allocate(&mut buffer.buffer)
@@ -131,8 +164,7 @@ impl Buffer {
     pub fn map(width: u32, height: u32, format: Format, fd: i32) -> Result<Self, Error> {
         let mut buffer = Buffer {
             buffer: vg_lite_buffer::new(width as i32, height as i32, format.into()),
-            source: BufferSource::None,
-            format
+            source: BufferSource::None
         };
         let error = unsafe {
             vg_lite_map(&mut buffer.buffer, vg_lite_map_flag_VG_LITE_MAP_DMABUF, fd)
@@ -143,6 +175,12 @@ impl Buffer {
         } else {
             Err(error.into())
         }
+    }
+
+    pub fn draw(&mut self) -> Result<(), Error> {
+        let error = unsafe {
+        };
+        Ok(())
     }
 }
 
@@ -162,7 +200,7 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let buffer = Buffer::allocate(0, 0, Format::BGR565);
+        let _buffer = Buffer::allocate(0, 0, Format::BGR565);
         assert_eq!(4, 4);
     }
 }
