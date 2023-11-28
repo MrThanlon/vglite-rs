@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #![allow(non_upper_case_globals)]
 mod vg_lite;
+mod path;
+mod transform;
 
 use vg_lite::*;
+use path::*;
+use transform::*;
 use std::ptr::null_mut;
 
 pub struct Context(());
@@ -56,6 +60,19 @@ impl From<Format> for vg_lite_format_t {
             Format::RGB565 => vg_lite_buffer_format_VG_LITE_RGB565,
             Format::BGR565 => vg_lite_buffer_format_VG_LITE_BGR565
         }
+    }
+}
+
+pub struct Color {
+    r: u8, g: u8, b:u8, a: u8
+}
+
+impl Into<u32> for Color {
+    fn into(self) -> u32 {
+        ((self.a as u32) << 24) |
+        ((self.r as u32) << 16) |
+        ((self.g as u32) << 8) |
+        (self.b as u32)
     }
 }
 
@@ -144,6 +161,8 @@ fn wrap_result<T>(t: T, error: vg_lite_error) -> Result<T, Error> {
     }
 }
 
+type Rectangle = vg_lite_rectangle;
+
 impl Buffer {
     pub fn allocate(width: u32, height: u32, format: Format) -> Result<Self, Error> {
         let mut buffer = Buffer {
@@ -177,10 +196,53 @@ impl Buffer {
         }
     }
 
-    pub fn draw(&mut self) -> Result<(), Error> {
-        let error = unsafe {
-        };
-        Ok(())
+    pub fn clear(&mut self, rectangle: Option<&mut Rectangle>, color: Color) -> Result<(), Error> {
+        wrap_result((), unsafe {
+            vg_lite_clear(&mut self.buffer, match rectangle {
+                Some(rect) => rect,
+                None => null_mut()
+            }, color.into())
+        })
+    }
+
+    pub fn blit(
+        &mut self,
+        source: &mut Buffer,
+        matrix: &mut Transform,
+        blend: Blend,
+        color: Color,
+        filter: Filter
+    ) -> Result<(), Error> {
+        wrap_result((), unsafe {
+            vg_lite_blit(
+                &mut self.buffer,
+                &mut source.buffer,
+                matrix,
+                blend.into(),
+                color.into(),
+                filter.into()
+            )
+        })
+    }
+
+    pub fn draw<T: OpCodeFormat>(
+        &mut self,
+        path: &mut Path<T>,
+        fill_rule: Fill,
+        transform: &mut Transform,
+        blend: Blend,
+        color: Color
+    ) -> Result<(), Error> {
+        wrap_result((), unsafe {
+            vg_lite_draw(
+                &mut self.buffer,
+                &mut path.path,
+                fill_rule.into(),
+                transform,
+                blend.into(),
+                color.into()
+            )
+        })
     }
 }
 
@@ -194,13 +256,38 @@ impl Drop for Buffer {
     }
 }
 
+pub enum Filter {
+    Pointer, Linear, BILinear
+}
+
+impl Into<vg_lite_filter> for Filter {
+    fn into(self) -> vg_lite_filter {
+        match self {
+            Self::Pointer => vg_lite_filter_VG_LITE_FILTER_POINT,
+            Self::Linear => vg_lite_filter_VG_LITE_FILTER_LINEAR,
+            Self::BILinear => vg_lite_filter_VG_LITE_FILTER_BI_LINEAR
+        }
+    }
+}
+
+pub enum Blend {
+    None = vg_lite_blend_VG_LITE_BLEND_NONE as isize,
+    SourceOver = vg_lite_blend_VG_LITE_BLEND_SRC_OVER as isize,
+}
+
+impl Into<vg_lite_blend> for Blend {
+    fn into(self) -> vg_lite_blend {
+        self as vg_lite_blend
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn it_works() {
-        let _buffer = Buffer::allocate(0, 0, Format::BGR565);
+        // let _buffer = Buffer::allocate(0, 0, Format::BGR565);
         assert_eq!(4, 4);
     }
 }
