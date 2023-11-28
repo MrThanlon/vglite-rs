@@ -7,7 +7,7 @@ fn main() {
 
     // Tell cargo to tell rustc to link the system bzip2
     // shared library.
-    println!("cargo:rustc-link-lib=vg_lite");
+    //println!("cargo:rustc-link-lib=vg_lite");
 
     // Tell cargo to invalidate the built crate whenever the wrapper changes
     println!("cargo:rerun-if-changed=vg_lite.h");

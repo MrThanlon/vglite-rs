@@ -1,30 +1,30 @@
 use crate::vg_lite::*;
 use crate::*;
-use std::ffi::c_void;
 
 pub trait OpCodeFormat {
     fn format() -> DataFormat;
+    fn size() -> u32;
 }
 
 impl OpCodeFormat for i8 {
-    fn format() -> DataFormat {
-        DataFormat::i8
-    }
+    fn format() -> DataFormat { DataFormat::I8 }
+
+    fn size() -> u32 { 1 }
 }
 impl OpCodeFormat for i16 {
-    fn format() -> DataFormat {
-        DataFormat::i16
-    }
+    fn format() -> DataFormat { DataFormat::I16 }
+
+    fn size() -> u32 { 2 }
 }
 impl OpCodeFormat for i32 {
-    fn format() -> DataFormat {
-        DataFormat::i32
-    }
+    fn format() -> DataFormat { DataFormat::I32 }
+
+    fn size() -> u32 { 4 }
 }
 impl OpCodeFormat for f32 {
-    fn format() -> DataFormat {
-        DataFormat::f32
-    }
+    fn format() -> DataFormat { DataFormat::F32 }
+
+    fn size() -> u32 { 4 }
 }
 #[derive(Debug, Clone)]
 pub enum Opcode<T: OpCodeFormat> {
@@ -80,12 +80,6 @@ pub enum Opcode<T: OpCodeFormat> {
     },
 }
 
-impl<T: OpCodeFormat> Opcode<T> {
-    fn format(&self) -> DataFormat {
-        T::format()
-    }
-}
-
 #[derive(Debug, Copy, Clone)]
 pub enum Quality {
     High, Upper, Medium, Low
@@ -103,17 +97,17 @@ impl Into<vg_lite_quality> for Quality {
 }
 
 #[derive(Debug, Copy, Clone)]
-enum DataFormat {
-    i8, i16, i32, f32
+pub enum DataFormat {
+    I8, I16, I32, F32
 }
 
 impl Into<vg_lite_format> for DataFormat {
     fn into(self) -> vg_lite_format {
         match self {
-            Self::i8 => vg_lite_format_VG_LITE_S8,
-            Self::i16 => vg_lite_format_VG_LITE_S16,
-            Self::i32 => vg_lite_format_VG_LITE_S32,
-            Self::f32 => vg_lite_format_VG_LITE_FP32,
+            Self::I8 => vg_lite_format_VG_LITE_S8,
+            Self::I16 => vg_lite_format_VG_LITE_S16,
+            Self::I32 => vg_lite_format_VG_LITE_S32,
+            Self::F32 => vg_lite_format_VG_LITE_FP32,
         }
     }
 }
@@ -135,12 +129,12 @@ impl Into<vg_lite_fill> for Fill {
 #[derive(Debug, Clone)]
 pub struct Path<T: OpCodeFormat> {
     pub path: vg_lite_path,
-    data: Vec<Opcode<T>>
+    data: Vec<Opcode<T>>,
+    command_buffer: Vec<u8>
 }
 
 impl<T: OpCodeFormat> Path<T> {
     pub fn new(quality: Quality) -> Self {
-        let mut data: Vec<Opcode<T>> = Vec::new();
         Self {
             path: vg_lite_path {
                 bounding_box: [0.;4],
@@ -154,7 +148,7 @@ impl<T: OpCodeFormat> Path<T> {
                     property:0
                 },
                 path_length: 0,
-                path: data.as_mut_ptr() as *mut c_void,
+                path: null_mut(),
                 path_changed: 0,
                 pdata_internal: 0,
                 path_type: vg_lite_path_type_VG_LITE_DRAW_FILL_PATH,
@@ -164,12 +158,34 @@ impl<T: OpCodeFormat> Path<T> {
                 stroke_color: 0,
                 add_end: 0
             },
-            data
+            data: Vec::new(),
+            command_buffer: Vec::new()
         }
     }
 
+    // TODO: insert into command buffer directly
     pub fn append(&mut self, p: Opcode<T>) {
         self.data.push(p);
         self.path.path_changed = 1;
+    }
+
+    pub fn close(&mut self) {
+        self.append(Opcode::Close);
+    }
+
+    pub fn end(&mut self) {
+        self.append(Opcode::End);
+    }
+
+    pub fn move_to(&mut self, x: T, y: T) {
+        self.append(Opcode::Move { x, y });
+    }
+
+    pub fn line_to(&mut self, x: T, y: T) {
+        self.append(Opcode::Line { x, y });
+    }
+
+    pub fn curve_to(&mut self, x1: T, y1: T, x2: T, y2: T, x: T, y: T) {
+        self.append(Opcode::Cubic { cx1: x1, cy1: y1, cx2: x2, cy2: y2, x, y });
     }
 }
