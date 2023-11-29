@@ -1,30 +1,31 @@
+use std::mem::{transmute, size_of};
+use std::os::raw::c_void;
+
 use crate::vg_lite::*;
 use crate::*;
 
-pub trait OpCodeFormat {
+pub trait OpCodeFormat: Sized + Clone + Copy {
     fn format() -> DataFormat;
-    fn size() -> u32;
+    fn transmute(op: u32) -> Self;
 }
 
 impl OpCodeFormat for i8 {
     fn format() -> DataFormat { DataFormat::I8 }
-
-    fn size() -> u32 { 1 }
+    fn transmute(op: u32) -> Self { op as i8 }
 }
 impl OpCodeFormat for i16 {
     fn format() -> DataFormat { DataFormat::I16 }
-
-    fn size() -> u32 { 2 }
+    fn transmute(op: u32) -> Self { op as i16 }
 }
 impl OpCodeFormat for i32 {
     fn format() -> DataFormat { DataFormat::I32 }
-
-    fn size() -> u32 { 4 }
+    fn transmute(op: u32) -> Self { op as i32 }
 }
 impl OpCodeFormat for f32 {
     fn format() -> DataFormat { DataFormat::F32 }
-
-    fn size() -> u32 { 4 }
+    fn transmute(op: u32) -> Self {
+        unsafe { transmute(op as u32) }
+    }
 }
 #[derive(Debug, Clone)]
 pub enum Opcode<T: OpCodeFormat> {
@@ -127,14 +128,74 @@ impl Into<vg_lite_fill> for Fill {
 }
 
 #[derive(Debug, Clone)]
-pub struct Path<T: OpCodeFormat> {
-    pub path: vg_lite_path,
-    data: Vec<Opcode<T>>,
-    command_buffer: Vec<u8>
+pub struct PathData<T: OpCodeFormat>(Vec<T>);
+
+impl<T: OpCodeFormat> PathData<T> {
+    pub fn append(&mut self, op: Opcode<T>) -> &mut Self {
+        let data = &mut self.0;
+        match op {
+            Opcode::End => { data.push(T::transmute(VLC_OP_END)) }
+            Opcode::Close => { data.push(T::transmute(VLC_OP_CLOSE)); }
+            Opcode::Move { x, y } => {
+                data.push(T::transmute(VLC_OP_MOVE));
+                data.push(x);
+                data.push(y);
+            }
+            Opcode::Line { x, y } => {
+                data.push(T::transmute(VLC_OP_LINE));
+                data.push(x);
+                data.push(y);
+            }
+            Opcode::Cubic { cx1, cy1, cx2, cy2, x, y } => {
+                data.push(T::transmute(VLC_OP_CUBIC));
+                data.push(cx1);
+                data.push(cy1);
+                data.push(cx2);
+                data.push(cy2);
+                data.push(x);
+                data.push(y);
+            }
+            _ => ()
+        };
+        self
+    }
+
+    pub fn close(&mut self) -> &mut Self {
+        self.append(Opcode::Close)
+    }
+
+    pub fn move_to(&mut self, x: T, y: T) -> &mut Self {
+        self.append(Opcode::Move { x, y })
+    }
+
+    pub fn line_to(&mut self, x: T, y: T) -> &mut Self {
+        self.append(Opcode::Line { x, y })
+    }
+
+    pub fn curve_to(&mut self, x1: T, y1: T, x2: T, y2: T, x: T, y: T) -> &mut Self {
+        self.append(Opcode::Cubic { cx1: x1, cy1: y1, cx2: x2, cy2: y2, x, y })
+    }
+
+    pub fn fill(self, quality: Quality) -> Path {
+        let mut path = Path::new(self, quality);
+        path.path.path_type |= 0b10;
+        path
+    }
+
+    pub fn stroke(self, quality: Quality) -> Path {
+        let mut path = Path::new(self, quality);
+        path.path.path_type |= 0b1;
+        path
+    }
 }
 
-impl<T: OpCodeFormat> Path<T> {
-    pub fn new(quality: Quality) -> Self {
+#[derive(Debug, Clone)]
+pub struct Path {
+    pub path: vg_lite_path
+}
+
+impl<T: OpCodeFormat> Path {
+    pub fn new(data: PathData<T>, quality: Quality) -> Self {
         Self {
             path: vg_lite_path {
                 bounding_box: [0.;4],
@@ -147,45 +208,17 @@ impl<T: OpCodeFormat> Path<T> {
                     bytes: 0,
                     property:0
                 },
-                path_length: 0,
-                path: null_mut(),
+                path_length: (data.0.len() * size_of::<T>()) as u32,
+                path: data.0.as_ptr() as *mut c_void,
                 path_changed: 0,
                 pdata_internal: 0,
-                path_type: vg_lite_path_type_VG_LITE_DRAW_FILL_PATH,
+                path_type: vg_lite_path_type_VG_LITE_DRAW_ZERO,
                 stroke: null_mut(),
                 stroke_path: null_mut(),
                 stroke_size: 0,
                 stroke_color: 0,
                 add_end: 0
-            },
-            data: Vec::new(),
-            command_buffer: Vec::new()
+            }
         }
-    }
-
-    // TODO: insert into command buffer directly
-    pub fn append(&mut self, p: Opcode<T>) {
-        self.data.push(p);
-        self.path.path_changed = 1;
-    }
-
-    pub fn close(&mut self) {
-        self.append(Opcode::Close);
-    }
-
-    pub fn end(&mut self) {
-        self.append(Opcode::End);
-    }
-
-    pub fn move_to(&mut self, x: T, y: T) {
-        self.append(Opcode::Move { x, y });
-    }
-
-    pub fn line_to(&mut self, x: T, y: T) {
-        self.append(Opcode::Line { x, y });
-    }
-
-    pub fn curve_to(&mut self, x1: T, y1: T, x2: T, y2: T, x: T, y: T) {
-        self.append(Opcode::Cubic { cx1: x1, cy1: y1, cx2: x2, cy2: y2, x, y });
     }
 }
