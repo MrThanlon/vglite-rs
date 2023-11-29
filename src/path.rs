@@ -176,25 +176,24 @@ impl<T: OpCodeFormat> PathData<T> {
         self.append(Opcode::Cubic { cx1: x1, cy1: y1, cx2: x2, cy2: y2, x, y })
     }
 
-    pub fn fill(self, quality: Quality) -> Path {
+    pub fn fill(self, quality: Quality) -> Path<T> {
         let mut path = Path::new(self, quality);
         path.path.path_type |= 0b10;
         path
     }
 
-    pub fn stroke(self, quality: Quality) -> Path {
-        let mut path = Path::new(self, quality);
-        path.path.path_type |= 0b1;
-        path
-    }
+    // TODO: stroke
 }
 
 #[derive(Debug, Clone)]
-pub struct Path {
-    pub path: vg_lite_path
+pub struct Path<T: OpCodeFormat> {
+    pub path: vg_lite_path,
+    #[allow(unused)]
+    /// To keep life cycle
+    data: PathData<T>
 }
 
-impl<T: OpCodeFormat> Path {
+impl<T: OpCodeFormat> Path<T> {
     pub fn new(data: PathData<T>, quality: Quality) -> Self {
         Self {
             path: vg_lite_path {
@@ -218,7 +217,8 @@ impl<T: OpCodeFormat> Path {
                 stroke_size: 0,
                 stroke_color: 0,
                 add_end: 0
-            }
+            },
+            data,
         }
     }
 }
