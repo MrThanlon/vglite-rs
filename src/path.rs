@@ -4,7 +4,8 @@ use std::os::raw::c_void;
 use crate::vg_lite::*;
 use crate::*;
 
-pub trait OpCodeFormat: Sized + Clone + Copy {
+pub struct BBoxUnit(f32);
+pub trait OpCodeFormat: Sized + Clone + Copy + PartialOrd + Default + Into<BBoxUnit> {
     fn format() -> DataFormat;
     fn transmute(op: u32) -> Self;
 }
@@ -13,13 +14,28 @@ impl OpCodeFormat for i8 {
     fn format() -> DataFormat { DataFormat::I8 }
     fn transmute(op: u32) -> Self { op as i8 }
 }
+impl Into<BBoxUnit> for i8 {
+    fn into(self) -> BBoxUnit {
+        BBoxUnit(self as f32)
+    }
+}
 impl OpCodeFormat for i16 {
     fn format() -> DataFormat { DataFormat::I16 }
     fn transmute(op: u32) -> Self { op as i16 }
 }
+impl Into<BBoxUnit> for i16 {
+    fn into(self) -> BBoxUnit {
+        BBoxUnit(self as f32)
+    }
+}
 impl OpCodeFormat for i32 {
     fn format() -> DataFormat { DataFormat::I32 }
     fn transmute(op: u32) -> Self { op as i32 }
+}
+impl Into<BBoxUnit> for i32 {
+    fn into(self) -> BBoxUnit {
+        BBoxUnit(self as f32)
+    }
 }
 impl OpCodeFormat for f32 {
     fn format() -> DataFormat { DataFormat::F32 }
@@ -27,6 +43,12 @@ impl OpCodeFormat for f32 {
         unsafe { transmute(op as u32) }
     }
 }
+impl Into<BBoxUnit> for f32 {
+    fn into(self) -> BBoxUnit {
+        BBoxUnit(self)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Opcode<T: OpCodeFormat> {
     End,
@@ -128,25 +150,48 @@ impl Into<vg_lite_fill> for Fill {
 }
 
 #[derive(Debug, Clone)]
-pub struct PathData<T: OpCodeFormat>(Vec<T>);
+pub struct PathData<T: OpCodeFormat> {
+    data: Vec<T>,
+    min_x: T,
+    min_y: T,
+    max_x: T,
+    max_y: T
+}
 
 impl<T: OpCodeFormat> PathData<T> {
     pub fn append(&mut self, op: Opcode<T>) -> &mut Self {
-        let data = &mut self.0;
+        let data = &mut self.data;
         match op {
             Opcode::End => { data.push(T::transmute(VLC_OP_END)) }
             Opcode::Close => { data.push(T::transmute(VLC_OP_CLOSE)); }
             Opcode::Move { x, y } => {
+                // FIXME
+                self.min_x = x;
+                self.max_x = x;
+                self.min_y = y;
+                self.max_y = y;
+
                 data.push(T::transmute(VLC_OP_MOVE));
                 data.push(x);
                 data.push(y);
             }
             Opcode::Line { x, y } => {
+                self.min_x = if self.min_x > x { x } else { self.min_x };
+                self.min_y = if self.min_y > y { y } else { self.min_y };
+                self.max_x = if self.max_x < x { x } else { self.max_x };
+                self.max_y = if self.max_y < y { y } else { self.max_y };
+
                 data.push(T::transmute(VLC_OP_LINE));
                 data.push(x);
                 data.push(y);
             }
             Opcode::Cubic { cx1, cy1, cx2, cy2, x, y } => {
+                self.min_x = if self.min_x > x { x } else { self.min_x };
+                self.min_y = if self.min_y > y { y } else { self.min_y };
+                self.max_x = if self.max_x < x { x } else { self.max_x };
+                self.max_y = if self.max_y < y { y } else { self.max_y };
+                // TODO:
+
                 data.push(T::transmute(VLC_OP_CUBIC));
                 data.push(cx1);
                 data.push(cy1);
@@ -176,6 +221,10 @@ impl<T: OpCodeFormat> PathData<T> {
         self.append(Opcode::Cubic { cx1: x1, cy1: y1, cx2: x2, cy2: y2, x, y })
     }
 
+    pub fn bounding_box(&self) -> [f32; 4] {
+        [self.min_x.into().0, self.min_y.into().0, self.max_x.into().0, self.max_y.into().0]
+    }
+
     pub fn fill(self, quality: Quality) -> Path<T> {
         let mut path = Path::new(self, quality);
         path.path.path_type |= 0b10;
@@ -185,11 +234,23 @@ impl<T: OpCodeFormat> PathData<T> {
     // TODO: stroke
 }
 
+impl<T: OpCodeFormat> Default for PathData<T> {
+    fn default() -> Self {
+        PathData {
+            data: Vec::new(),
+            min_x: T::default(),
+            min_y: T::default(),
+            max_x: T::default(),
+            max_y: T::default()
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Path<T: OpCodeFormat> {
     pub path: vg_lite_path,
     #[allow(unused)]
-    /// To keep life cycle
+    /// Keep life cycle
     data: PathData<T>
 }
 
@@ -197,7 +258,7 @@ impl<T: OpCodeFormat> Path<T> {
     pub fn new(data: PathData<T>, quality: Quality) -> Self {
         Self {
             path: vg_lite_path {
-                bounding_box: [0.;4],
+                bounding_box: [0.; 4],
                 quality: quality.into(),
                 format: T::format().into(),
                 uploaded: vg_lite_hw_memory {
@@ -207,9 +268,9 @@ impl<T: OpCodeFormat> Path<T> {
                     bytes: 0,
                     property:0
                 },
-                path_length: (data.0.len() * size_of::<T>()) as u32,
-                path: data.0.as_ptr() as *mut c_void,
-                path_changed: 0,
+                path_length: (data.data.len() * size_of::<T>()) as u32,
+                path: data.data.as_ptr() as *mut c_void,
+                path_changed: 1,
                 pdata_internal: 0,
                 path_type: vg_lite_path_type_VG_LITE_DRAW_ZERO,
                 stroke: null_mut(),
