@@ -13,22 +13,22 @@ pub struct Context(());
 impl Context {
     /// Can be called before [`Context::new`] to overwrite the default value: 65536
     pub fn set_command_size(size: u32) -> Result<(), Error> {
-        wrap_result((), unsafe {
+        wrap_result(unsafe {
             vg_lite_set_command_buffer_size(size)
-        })
+        }, ())
     }
     pub fn new(tess_width: u32, tess_height: u32) -> Result<Self, Error> {
-        wrap_result(Context(()), unsafe {
+        wrap_result(unsafe {
             vg_lite_init(tess_width as i32, tess_height as i32)
-        })
+        }, Context(()))
     }
     /// Do drawing with blocking
     pub fn finish(self) -> Result<(), Error> {
-        wrap_result((), unsafe { vg_lite_finish() })
+        wrap_result(unsafe { vg_lite_finish() }, ())
     }
     /// Do drawing without blocking
     pub fn flush(self) -> Result<(), Error> {
-        wrap_result((), unsafe { vg_lite_flush() })
+        wrap_result(unsafe { vg_lite_flush() }, ())
     }
 }
 
@@ -39,6 +39,7 @@ impl Drop for Context {
 }
 
 enum BufferSource {
+    #[allow(dead_code)]
     None,
     Allocated,
     Mapped
@@ -123,6 +124,7 @@ impl vg_lite_buffer {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum Error {
     InvalidArgument,
     OutOfMemory,
@@ -157,7 +159,7 @@ impl From<vg_lite_error> for Error {
     }
 }
 
-fn wrap_result<T>(t: T, error: vg_lite_error) -> Result<T, Error> {
+fn wrap_result<T>(error: vg_lite_error, t: T) -> Result<T, Error> {
     if error == vg_lite_error_VG_LITE_SUCCESS {
         Ok(t)
     } else {
@@ -167,21 +169,15 @@ fn wrap_result<T>(t: T, error: vg_lite_error) -> Result<T, Error> {
 
 type Rectangle = vg_lite_rectangle;
 
-fn some_take_buffer(b: &mut vg_lite_buffer) {
-    dbg!(b);
-}
-
 impl Buffer {
     pub fn allocate(width: u32, height: u32, format: Format) -> Result<Self, Error> {
         let mut buffer = Buffer {
             buffer: vg_lite_buffer::new(width as i32, height as i32, format.into()),
             source: BufferSource::Allocated
         };
-        let error = unsafe {
+        wrap_result(unsafe {
             vg_lite_allocate(&mut buffer.buffer)
-        };
-        some_take_buffer(&mut buffer.buffer);
-        wrap_result(buffer, error)
+        }, buffer)
     }
 
     pub fn map(width: u32, height: u32, format: Format, dmabuf_fd: i32) -> Result<Self, Error> {
@@ -189,19 +185,22 @@ impl Buffer {
             buffer: vg_lite_buffer::new(width as i32, height as i32, format.into()),
             source: BufferSource::Mapped
         };
-        let error = unsafe {
+        wrap_result(unsafe {
             vg_lite_map(&mut buffer.buffer, vg_lite_map_flag_VG_LITE_MAP_DMABUF, dmabuf_fd)
-        };
-        wrap_result(buffer, error)
+        }, buffer)
     }
 
     pub fn clear(&mut self, rectangle: Option<&mut Rectangle>, color: Color) -> Result<(), Error> {
-        wrap_result((), unsafe {
-            vg_lite_clear(&mut self.buffer, match rectangle {
-                Some(rect) => rect,
-                None => null_mut()
-            }, color.into())
-        })
+        wrap_result(unsafe {
+            vg_lite_clear(
+                &mut self.buffer,
+                match rectangle {
+                    Some(rect) => rect,
+                    None => null_mut()
+                },
+                color.into()
+            )
+        }, ())
     }
 
     pub fn blit(
@@ -212,7 +211,7 @@ impl Buffer {
         color: Color,
         filter: Filter
     ) -> Result<(), Error> {
-        wrap_result((), unsafe {
+        wrap_result(unsafe {
             vg_lite_blit(
                 &mut self.buffer,
                 &mut source.buffer,
@@ -221,7 +220,7 @@ impl Buffer {
                 color.into(),
                 filter.into()
             )
-        })
+        }, ())
     }
 
     pub fn draw<T: OpCodeFormat>(
@@ -232,7 +231,7 @@ impl Buffer {
         blend: Blend,
         color: Color
     ) -> Result<(), Error> {
-        wrap_result((), unsafe {
+        wrap_result(unsafe {
             vg_lite_draw(
                 &mut self.buffer,
                 &mut path.path,
@@ -241,25 +240,35 @@ impl Buffer {
                 blend.into(),
                 color.into()
             )
-        })
+        }, ())
     }
 
     pub fn draw_pattern<T: OpCodeFormat>(
         &mut self,
         path: &mut Path<T>,
         fill_rule: Fill,
-        transform: &mut Transform,
+        path_transform: &mut Transform,
+        pattern: &mut Buffer,
+        pattern_matrix: &mut Transform,
         blend: Blend,
+        pattern_mode: PatternMode,
         color: Color,
         filter: Filter
-    ) {
-        // wrap_result((), unsafe {
-        //     vg_lite_draw_pattern(
-        //         &mut self.buffer,
-        //         &mut path.path,
-        //         fill_rule,
-        //         transform, pattern_image, pattern_matrix, blend, pattern_mode, color, filter)
-        // })
+    ) -> Result<(), Error> {
+        wrap_result(unsafe {
+            vg_lite_draw_pattern(
+                &mut self.buffer,
+                &mut path.path,
+                fill_rule.into(),
+                path_transform,
+                &mut pattern.buffer,
+                pattern_matrix,
+                blend.into(),
+                pattern_mode.into(),
+                color.into(),
+                filter.into()
+            )
+        }, ())
     }
 }
 
@@ -300,13 +309,35 @@ impl Into<vg_lite_blend> for Blend {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum PatternMode {
+    Color = vg_lite_pattern_mode_VG_LITE_PATTERN_COLOR as isize,
+    Pad = vg_lite_pattern_mode_VG_LITE_PATTERN_PAD as isize,
+    Repeat = vg_lite_pattern_mode_VG_LITE_PATTERN_REPEAT as isize,
+    Reflect = vg_lite_pattern_mode_VG_LITE_PATTERN_REFLECT as isize,
+}
+
+impl Into<vg_lite_pattern_mode> for PatternMode {
+    fn into(self) -> vg_lite_pattern_mode {
+        self as vg_lite_pattern_mode
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]
-    fn it_works() {
-        // let _buffer = Buffer::allocate(0, 0, Format::BGR565);
-        assert_eq!(4, 4);
+    fn init_and_deinit() {
+        // let ctx = Context::new(640, 480).unwrap();
+        let mut buffer = Buffer::allocate(640, 480, Format::RGBA8888).unwrap();
+        buffer.clear(None, Color { r: 0, g: 0, b: 0, a: 0 }).unwrap();
+        // ctx.flush().unwrap();
+    }
+
+    #[test]
+    fn test_fail() {
+        wrap_result(vg_lite_error_VG_LITE_INVALID_ARGUMENT, ()).unwrap();
     }
 }
