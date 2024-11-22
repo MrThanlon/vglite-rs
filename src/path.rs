@@ -217,6 +217,10 @@ impl<T: OpCodeFormat> PathData<T> {
         self.append(Opcode::Line { x, y })
     }
 
+    pub fn quad_to(&mut self, x1: T, y1: T, x: T, y: T) -> &mut Self {
+        self.append(Opcode::Quad { cx: x1, cy: y1, x, y })
+    }
+
     pub fn curve_to(&mut self, x1: T, y1: T, x2: T, y2: T, x: T, y: T) -> &mut Self {
         self.append(Opcode::Cubic { cx1: x1, cy1: y1, cx2: x2, cy2: y2, x, y })
     }
@@ -226,8 +230,13 @@ impl<T: OpCodeFormat> PathData<T> {
     }
 
     pub fn fill(self, quality: Quality) -> Path<T> {
+        let bbox = self.bounding_box();
         let mut path = Path::new(self, quality);
         path.path.path_type |= 0b10;
+        path.path.bounding_box[0] = bbox[0];
+        path.path.bounding_box[1] = bbox[1];
+        path.path.bounding_box[2] = bbox[2];
+        path.path.bounding_box[3] = bbox[3];
         path
     }
 
@@ -243,6 +252,15 @@ impl<T: OpCodeFormat> Default for PathData<T> {
             max_x: T::default(),
             max_y: T::default()
         }
+    }
+}
+
+impl<T: OpCodeFormat> PathData<T> {
+    pub fn set_bbox(&mut self, min_x: T, min_y: T, max_x: T, max_y: T) {
+        self.min_x = min_x;
+        self.min_y = min_y;
+        self.max_x = max_x;
+        self.max_y = max_y;
     }
 }
 

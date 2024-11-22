@@ -5,8 +5,8 @@ mod path;
 mod transform;
 
 use vg_lite::*;
-use path::*;
-use transform::*;
+pub use path::*;
+pub use transform::*;
 use std::ptr::null_mut;
 
 pub struct Context(());
@@ -63,6 +63,7 @@ impl From<Format> for vg_lite_format_t {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct Color {
     r: u8, g: u8, b:u8, a: u8
 }
@@ -81,16 +82,9 @@ pub struct Buffer {
     source: BufferSource,
 }
 
-impl vg_lite_buffer {
-    fn new(width: i32, height: i32, format: vg_lite_format) -> Self {
-        let mut buffer = Self::default();
-        buffer.width = width;
-        buffer.height = height;
-        buffer.format = format;
-        buffer
-    }
+impl Default for vg_lite_buffer {
     fn default() -> Self {
-        vg_lite_buffer {
+        Self {
             width: 0, height: 0, stride: 0,
             tiled: 0, format: 0, handle: null_mut(),
             memory: null_mut(), address: 0,
@@ -116,6 +110,16 @@ impl vg_lite_buffer {
             ],
             compress_mode: 0, index_endian: 0
         }
+    }
+}
+
+impl vg_lite_buffer {
+    fn new(width: i32, height: i32, format: vg_lite_format) -> Self {
+        let mut buffer = Self::default();
+        buffer.width = width;
+        buffer.height = height;
+        buffer.format = format;
+        buffer
     }
 }
 
@@ -163,37 +167,32 @@ fn wrap_result<T>(t: T, error: vg_lite_error) -> Result<T, Error> {
 
 type Rectangle = vg_lite_rectangle;
 
+fn some_take_buffer(b: &mut vg_lite_buffer) {
+    dbg!(b);
+}
+
 impl Buffer {
     pub fn allocate(width: u32, height: u32, format: Format) -> Result<Self, Error> {
         let mut buffer = Buffer {
             buffer: vg_lite_buffer::new(width as i32, height as i32, format.into()),
-            source: BufferSource::None
+            source: BufferSource::Allocated
         };
         let error = unsafe {
             vg_lite_allocate(&mut buffer.buffer)
         };
-        if error != 0 {
-            Err(error.into())
-        } else {
-            buffer.source = BufferSource::Allocated;
-            Ok(buffer)
-        }
+        some_take_buffer(&mut buffer.buffer);
+        wrap_result(buffer, error)
     }
 
-    pub fn map(width: u32, height: u32, format: Format, fd: i32) -> Result<Self, Error> {
+    pub fn map(width: u32, height: u32, format: Format, dmabuf_fd: i32) -> Result<Self, Error> {
         let mut buffer = Buffer {
             buffer: vg_lite_buffer::new(width as i32, height as i32, format.into()),
-            source: BufferSource::None
+            source: BufferSource::Mapped
         };
         let error = unsafe {
-            vg_lite_map(&mut buffer.buffer, vg_lite_map_flag_VG_LITE_MAP_DMABUF, fd)
+            vg_lite_map(&mut buffer.buffer, vg_lite_map_flag_VG_LITE_MAP_DMABUF, dmabuf_fd)
         };
-        if error == vg_lite_error_VG_LITE_SUCCESS {
-            buffer.source = BufferSource::Mapped;
-            Ok(buffer)
-        } else {
-            Err(error.into())
-        }
+        wrap_result(buffer, error)
     }
 
     pub fn clear(&mut self, rectangle: Option<&mut Rectangle>, color: Color) -> Result<(), Error> {
@@ -244,6 +243,24 @@ impl Buffer {
             )
         })
     }
+
+    pub fn draw_pattern<T: OpCodeFormat>(
+        &mut self,
+        path: &mut Path<T>,
+        fill_rule: Fill,
+        transform: &mut Transform,
+        blend: Blend,
+        color: Color,
+        filter: Filter
+    ) {
+        // wrap_result((), unsafe {
+        //     vg_lite_draw_pattern(
+        //         &mut self.buffer,
+        //         &mut path.path,
+        //         fill_rule,
+        //         transform, pattern_image, pattern_matrix, blend, pattern_mode, color, filter)
+        // })
+    }
 }
 
 impl Drop for Buffer {
@@ -256,8 +273,9 @@ impl Drop for Buffer {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum Filter {
-    Pointer, Linear, BILinear
+    Pointer, Linear, Bilinear
 }
 
 impl Into<vg_lite_filter> for Filter {
@@ -265,11 +283,12 @@ impl Into<vg_lite_filter> for Filter {
         match self {
             Self::Pointer => vg_lite_filter_VG_LITE_FILTER_POINT,
             Self::Linear => vg_lite_filter_VG_LITE_FILTER_LINEAR,
-            Self::BILinear => vg_lite_filter_VG_LITE_FILTER_BI_LINEAR
+            Self::Bilinear => vg_lite_filter_VG_LITE_FILTER_BI_LINEAR
         }
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum Blend {
     None = vg_lite_blend_VG_LITE_BLEND_NONE as isize,
     SourceOver = vg_lite_blend_VG_LITE_BLEND_SRC_OVER as isize,

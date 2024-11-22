@@ -36,7 +36,7 @@ extern "C" {
 #define inline __inline
 #endif
 
-#include <stddef.h>
+#include <linux/stddef.h>
 #include <stdint.h>
 
 
