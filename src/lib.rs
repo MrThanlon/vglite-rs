@@ -7,7 +7,7 @@ mod transform;
 use vg_lite::*;
 pub use path::*;
 pub use transform::*;
-use std::ptr::null_mut;
+use std::{ffi::c_void, ptr::null_mut};
 
 pub struct Context(());
 impl Context {
@@ -23,11 +23,11 @@ impl Context {
         }, Context(()))
     }
     /// Do drawing with blocking
-    pub fn finish(self) -> Result<(), Error> {
+    pub fn finish(&self) -> Result<(), Error> {
         wrap_result(unsafe { vg_lite_finish() }, ())
     }
     /// Do drawing without blocking
-    pub fn flush(self) -> Result<(), Error> {
+    pub fn flush(&self) -> Result<(), Error> {
         wrap_result(unsafe { vg_lite_flush() }, ())
     }
 }
@@ -53,6 +53,15 @@ pub enum Format {
     BGR565
 }
 
+impl Format {
+    fn bpp(&self) -> u32 {
+        match self {
+            Self::BGR565 | Self::RGB565 => 2,
+            Self::BGRA8888 | Self::RGBA8888 => 4
+        }
+    }
+}
+
 impl From<Format> for vg_lite_format_t {
     fn from(format: Format) -> Self {
         match format {
@@ -66,7 +75,10 @@ impl From<Format> for vg_lite_format_t {
 
 #[derive(Clone, Copy)]
 pub struct Color {
-    r: u8, g: u8, b:u8, a: u8
+    pub r: u8,
+    pub g: u8,
+    pub b:u8,
+    pub a: u8
 }
 
 impl Into<u32> for Color {
@@ -163,11 +175,12 @@ fn wrap_result<T>(error: vg_lite_error, t: T) -> Result<T, Error> {
     if error == vg_lite_error_VG_LITE_SUCCESS {
         Ok(t)
     } else {
+        eprintln!("vg_lite error: {}", error);
         Err(error.into())
     }
 }
 
-type Rectangle = vg_lite_rectangle;
+pub type Rectangle = vg_lite_rectangle;
 
 impl Buffer {
     pub fn allocate(width: u32, height: u32, format: Format) -> Result<Self, Error> {
@@ -175,19 +188,32 @@ impl Buffer {
             buffer: vg_lite_buffer::new(width as i32, height as i32, format.into()),
             source: BufferSource::Allocated
         };
-        wrap_result(unsafe {
+        let error = unsafe {
             vg_lite_allocate(&mut buffer.buffer)
-        }, buffer)
+        };
+        dbg!(buffer.buffer.memory);
+        wrap_result(error, buffer)
     }
 
-    pub fn map(width: u32, height: u32, format: Format, dmabuf_fd: i32) -> Result<Self, Error> {
+    pub fn map(width: u32, height: u32, format: Format, dmabuf_fd: i32, memory: *mut c_void) -> Result<Self, Error> {
         let mut buffer = Buffer {
             buffer: vg_lite_buffer::new(width as i32, height as i32, format.into()),
             source: BufferSource::Mapped
         };
+        buffer.buffer.stride = (width * format.bpp()) as i32;
+        buffer.buffer.memory = memory;
         wrap_result(unsafe {
             vg_lite_map(&mut buffer.buffer, vg_lite_map_flag_VG_LITE_MAP_DMABUF, dmabuf_fd)
         }, buffer)
+    }
+
+    pub fn data(&self) -> &mut [u8] {
+        unsafe {
+            core::slice::from_raw_parts_mut(
+                self.buffer.memory as *mut u8,
+                (self.buffer.stride * self.buffer.height) as usize
+            )
+        }
     }
 
     pub fn clear(&mut self, rectangle: Option<&mut Rectangle>, color: Color) -> Result<(), Error> {
@@ -330,14 +356,9 @@ mod tests {
 
     #[test]
     fn init_and_deinit() {
-        // let ctx = Context::new(640, 480).unwrap();
-        let mut buffer = Buffer::allocate(640, 480, Format::RGBA8888).unwrap();
+        let ctx = Context::new(640, 480).unwrap();
+        let mut buffer = Buffer::allocate(640, 480, Format::BGRA8888).unwrap();
         buffer.clear(None, Color { r: 0, g: 0, b: 0, a: 0 }).unwrap();
-        // ctx.flush().unwrap();
-    }
-
-    #[test]
-    fn test_fail() {
-        wrap_result(vg_lite_error_VG_LITE_INVALID_ARGUMENT, ()).unwrap();
+        ctx.finish().unwrap();
     }
 }
