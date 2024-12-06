@@ -1,9 +1,8 @@
-use std::{io::Write, thread::sleep};
+use std::io::Write;
 
 use vglite_rs::{Context, Buffer, Color, Format, Rectangle};
 
 fn main() {
-    println!("Hello, world!");
     let ctx = Context::new(640, 480).unwrap();
     let mut buffer = Buffer::allocate(640, 480, Format::RGBA8888).unwrap();
     buffer.clear(None, Color { r: 0, g: 0, b: 0, a: 255 }).unwrap();

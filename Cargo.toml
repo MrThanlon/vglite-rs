@@ -9,3 +9,12 @@ edition = "2021"
 
 [build-dependencies]
 bindgen = "0.65.1"
+
+[[example]]
+name = "rect"
+
+[[example]]
+name = "display"
+
+[dev-dependencies]
+drm = "0.14.1"

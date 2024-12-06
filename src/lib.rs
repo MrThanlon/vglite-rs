@@ -175,7 +175,7 @@ fn wrap_result<T>(error: vg_lite_error, t: T) -> Result<T, Error> {
     if error == vg_lite_error_VG_LITE_SUCCESS {
         Ok(t)
     } else {
-        eprintln!("vg_lite error: {}", error);
+        // eprintln!("vg_lite error: {}", error);
         Err(error.into())
     }
 }
@@ -200,6 +200,7 @@ impl Buffer {
             buffer: vg_lite_buffer::new(width as i32, height as i32, format.into()),
             source: BufferSource::Mapped
         };
+        buffer.buffer.address = 0xdeaddead;
         buffer.buffer.stride = (width * format.bpp()) as i32;
         buffer.buffer.memory = memory;
         wrap_result(unsafe {
